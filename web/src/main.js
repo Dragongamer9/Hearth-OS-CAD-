@@ -1,7 +1,7 @@
 // Hearth OS CAD: the window's page. Builds the 123D-style tool bar, menus, view cube, navigation strip and dialogs,
 // and keeps the 3D view in step with the design.
 import * as THREE from "three";
-import { Design, KINDS, PARAM_LABELS, OP_LABELS } from "./doc.js";
+import { Design, KINDS, PARAM_LABELS, OP_LABELS, MODIFY_LABELS, MODIFY_PARAMS } from "./doc.js";
 import { Viewport } from "./viewport.js";
 import * as kernel from "./kernel.js";
 import * as files from "./files.js";
@@ -38,14 +38,14 @@ function toast(text, err = false) {
 const GROUPS = [
   { id: "transform", icon: "transform", label: "Transform", items: [["move", "Move"], ["rotate", "Rotate"]] },
   { id: "primitives", icon: "primitives", label: "Primitives", grid: true, items: Object.keys(KINDS).map((k) => [k, KINDS[k].label]) },
-  { id: "sketch", icon: "sketch", label: "Sketch", soon: true },
-  { id: "construct", icon: "construct", label: "Construct", soon: true },
-  { id: "modify", icon: "modify", label: "Modify", soon: true },
-  { id: "pattern", icon: "pattern", label: "Pattern", soon: true },
-  { id: "grouping", icon: "grouping", label: "Grouping", soon: true },
+  { id: "sketch", icon: "sketch", label: "Sketch", items: [["rect", "Rectangle"], ["circle2", "Circle"], ["ngon", "Polygon"], ["poly", "Polyline"]] },
+  { id: "construct", icon: "construct", label: "Construct", items: [["extrude", "Extrude"], ["revolve", "Revolve"], ["sweep", "Sweep", true], ["loft", "Loft", true]] },
+  { id: "modify", icon: "modify", label: "Modify", items: [["pushpull", "Press/Pull"], ["tweak", "Tweak", true], ["split", "Split Face", true], ["fillet", "Fillet"], ["chamfer", "Chamfer"], ["shell", "Shell"]] },
+  { id: "pattern", icon: "pattern", label: "Pattern", items: [["rectpattern", "Rectangular"], ["circpattern", "Circular"], ["mirror", "Mirror"]] },
+  { id: "grouping", icon: "grouping", label: "Grouping", items: [["group", "Group"], ["ungroup", "Ungroup"]] },
   { id: "combine", icon: "combine", label: "Combine", items: [["join", "Join"], ["subtract", "Subtract"], ["intersect", "Intersect"], ["separate", "Separate"]] },
-  { id: "measure", icon: "measure", label: "Measure", soon: true },
-  { id: "text", icon: "text", label: "Text", soon: true },
+  { id: "measure", icon: "measure", label: "Measure", action: "measure" },
+  { id: "text", icon: "text", label: "Text", action: "text" },
   { id: "snap", icon: "snap", label: "Snap to grid", toggle: true },
   { id: "material", icon: "material", label: "Material", swatches: true },
 ];
@@ -79,6 +79,7 @@ function buildTopbar() {
     const g = GROUPS.find((x) => x.id === b.dataset.group);
     if (!g) return;
     if (g.toggle) { setSnapOn(!snapOn()); return; }
+    if (g.action) { closeMenus(); act(g.action); return; }
     toggleMenu(g.id, b);
   });
   refreshSnapButton();
@@ -114,8 +115,8 @@ function toggleMenu(id, anchor) {
       }
     } else {
       dd = h(`<div class="dd list" role="menu"></div>`);
-      for (const [k, label] of g.items) {
-        const b = h(`<button class="mi" role="menuitem">${I[k]}${label}</button>`);
+      for (const [k, label, soon] of g.items) {
+        const b = h(`<button class="mi" role="menuitem" data-act="${k}" ${soon ? `disabled title="${SOON}"` : ""}>${I[k]}${label}${soon ? '<span class="k">Soon</span>' : ""}</button>`);
         b.onclick = () => { closeMenus(); act(k); };
         dd.appendChild(b);
       }
@@ -241,6 +242,7 @@ function preview(kind) {
   else if (kind === "cone") g = new THREE.CylinderGeometry(p.r2 || 0.001, p.r1, p.h, 40).rotateX(Math.PI / 2).translate(0, 0, p.h / 2);
   else if (kind === "torus") g = new THREE.TorusGeometry(p.R, p.r, 16, 48).translate(0, 0, p.r);
   else if (kind === "prism") g = new THREE.CylinderGeometry(p.r, p.r, p.h, p.sides).rotateX(Math.PI / 2).translate(0, 0, p.h / 2);
+  else if (kind === "text") g = new THREE.BoxGeometry(p.size * 0.65 * String(p.text).length, p.size, p.depth).translate(0, 0, p.depth / 2);
   else {
     const s = new THREE.Shape([new THREE.Vector2(-p.w / 2, 0), new THREE.Vector2(p.w / 2, 0), new THREE.Vector2(-p.w / 2, p.h)]);
     g = new THREE.ExtrudeGeometry(s, { depth: p.d, bevelEnabled: false }).rotateX(Math.PI / 2).translate(0, p.d / 2, 0);
@@ -262,7 +264,7 @@ const defaultHint = () => (design.parts.length ? "Click a part to pick it · Shi
 const shown = new Map(); // part id -> key of what's drawn
 const meshCache = new Map(); // key -> mesh data from the geometry engine
 // What a part looks like regardless of where it sits, its name or its colour (those don't need the geometry engine).
-const keyOf = (p) => (p.kind === "mesh" ? `mesh:${p.meshRef}` : JSON.stringify({ ...p, tf: undefined, name: undefined, id: undefined, color: undefined }));
+const keyOf = (p) => (p.kind === "mesh" ? `mesh:${p.meshRef}` : p.kind === "sketch" ? `sketch:${JSON.stringify(p.shapes)}` : JSON.stringify({ ...p, tf: undefined, name: undefined, id: undefined, color: undefined }));
 let syncRun = 0;
 
 let syncing = 0;
@@ -292,6 +294,7 @@ async function syncInner() {
     const key = keyOf(p);
     try {
       let data;
+      if (p.kind === "sketch") { view.setSketch(p); shown.set(p.id, key); continue; }
       if (p.kind === "mesh") data = { positions: design.meshes.get(p.meshRef).positions };
       else {
         data = meshCache.get(key);
@@ -336,6 +339,7 @@ function select(ids) {
 
 function refreshSelectionUI() {
   const q = $("#quick");
+  if (tool) { q.hidden = true; return; }
   const parts = selection.map((id) => design.find(id)).filter(Boolean);
   if (!parts.length) { q.hidden = true; $("#props").hidden = true; return; }
   q.hidden = false;
@@ -346,7 +350,9 @@ function refreshSelectionUI() {
     `<button class="q gear" aria-label="Quick tools" title="${parts.length} picked">${I.gear}</button>`,
     btn("move", "move", "Move (M)"), btn("rotate", "rotate", "Rotate (R)"), btn("duplicate", "duplicate", "Duplicate (Ctrl+D)"),
     many ? `<span class="qsep"></span>${btn("join", "join", "Join")}${btn("subtract", "subtract", "Subtract (first picked keeps)")}${btn("intersect", "intersect", "Intersect")}` : "",
-    one && one.kind === "boolean" ? `<span class="qsep"></span>${btn("separate", "separate", "Separate")}` : "",
+    one && one.kind === "sketch" ? `<span class="qsep"></span>${btn("extrude", "extrude", "Extrude")}${btn("revolve", "revolve", "Revolve")}` : "",
+    one && isSolid(one) ? `<span class="qsep"></span>${btn("pushpull", "pushpull", "Press/Pull")}${btn("fillet", "fillet", "Fillet")}${btn("chamfer", "chamfer", "Chamfer")}${btn("shell", "shell", "Shell")}` : "",
+    one && (one.kind === "boolean" || (one.kind === "modify" && one.op !== "mirror")) ? `<span class="qsep"></span>${btn("separate", one.kind === "modify" ? "undo" : one.op === "group" ? "ungroup" : "separate", one.kind === "modify" ? `Take off the ${MODIFY_LABELS[one.op].toLowerCase()}` : one.op === "group" ? "Ungroup" : "Separate")}` : "",
     `<span class="qsep"></span>${btn("delete", "trash", "Delete (Del)", "danger")}`,
   ].join("");
   q.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => act(b.dataset.q));
@@ -360,20 +366,34 @@ function showProps(one, parts) {
     el.innerHTML = `<div class="lbl">${parts.length} parts picked</div><div style="font-size:13px;color:#5d656e">Use the round bar below to move, rotate, duplicate, join, subtract or intersect them.</div>`;
     return;
   }
-  const kindName = one.kind === "boolean" ? `${OP_LABELS[one.op]} from ${one.children.length} parts` : one.kind === "brep" ? "Solid (from STEP)" : one.kind === "mesh" ? "Mesh (triangles)" : KINDS[one.kind].label;
-  const sizes = KINDS[one.kind] ? Object.keys(one.params).map((k) => `<label>${PARAM_LABELS[k] || k}<input data-param="${k}" type="number" step="${k === "sides" ? 1 : 0.5}" min="${k === "r2" ? 0 : k === "sides" ? 3 : 0.1}" value="${+one.params[k]}"></label>`).join("") : "";
+  if (tool) return;
+  const kindName = one.kind === "boolean" ? (one.op === "group" ? `Group of ${one.children.length} parts` : `${OP_LABELS[one.op]} from ${one.children.length} parts`)
+    : one.kind === "brep" ? "Solid (from STEP)" : one.kind === "mesh" ? "Mesh (triangles)" : one.kind === "sketch" ? `Sketch · ${one.shapes.length} shape${one.shapes.length > 1 ? "s" : ""}`
+    : one.kind === "modify" ? `${MODIFY_LABELS[one.op]} on ${one.child.name}` : one.kind === "extrude" ? "Extruded sketch" : one.kind === "revolve" ? "Revolved sketch" : KINDS[one.kind].label;
+  const paramLabels = KINDS[one.kind] ? PARAM_LABELS : one.kind === "modify" || one.kind === "extrude" || one.kind === "revolve" ? (MODIFY_PARAMS[one.op || one.kind] || {}) : null;
+  const sizes = paramLabels && one.params ? Object.keys(paramLabels).filter((k) => k in one.params).map((k) => k === "text"
+    ? `<label style="grid-column: 1 / -1">${paramLabels[k]}<input data-param="${k}" data-text value="${esc(one.params[k])}"></label>`
+    : `<label>${paramLabels[k] || k}<input data-param="${k}" type="number" step="${k === "sides" ? 1 : k === "angle" ? 15 : 0.5}" min="${k === "r2" ? 0 : k === "sides" ? 3 : k === "distance" ? -1000 : 0.1}" value="${+one.params[k]}"></label>`).join("") : "";
+  const g = view.groups.get(one.id);
+  let sizeLine = "";
+  if (g) { const b = new THREE.Box3().expandByObject(g); if (!b.isEmpty()) { const v = b.getSize(new THREE.Vector3()); sizeLine = `${v.x.toFixed(1)} × ${v.y.toFixed(1)} × ${v.z.toFixed(1)} mm`; } }
   const tf = one.tf;
   el.innerHTML = `
     <input class="name" aria-label="Part name" value="${esc(one.name)}">
-    <div class="kind">${kindName}</div>
-    ${sizes ? `<div><div class="lbl">Size (mm)</div><div class="fields">${sizes}</div></div>` : ""}
+    <div class="kind">${kindName}${sizeLine ? ` · ${sizeLine}` : ""}</div>
+    ${sizes ? `<div><div class="lbl">${KINDS[one.kind] ? "Size (mm)" : "Settings"}</div><div class="fields">${sizes}</div></div>` : ""}
+    ${one.kind === "revolve" ? `<div><div class="lbl">Turn around</div><div class="seg"><button data-axis="y" class="${one.params.axis !== "x" ? "on" : ""}">Sketch's up line</button><button data-axis="x" class="${one.params.axis === "x" ? "on" : ""}">Sketch's side line</button></div></div>` : ""}
+    ${one.kind === "sketch" ? `<div style="display:flex;gap:6px"><button class="btn pri" data-do="extrude">Extrude</button><button class="btn" data-do="revolve">Revolve</button></div>` : ""}
     <div><div class="lbl">Position (mm)</div><div class="fields">${["X", "Y", "Z"].map((a, i) => `<label>${a}<input data-pos="${i}" type="number" step="${snapSize()}" value="${+tf.p[i].toFixed(3)}"></label>`).join("")}</div></div>
     <div><div class="lbl">Rotation (°)</div><div class="fields">${["X", "Y", "Z"].map((a, i) => `<label>${a}<input data-rot="${i}" type="number" step="15" value="${+tf.r[i].toFixed(2)}"></label>`).join("")}</div></div>
     ${one.kind === "mesh" || one.kind === "brep" || one.kind === "boolean" ? `<div><div class="lbl">Scale</div><div class="fields"><label>Times<input data-scale type="number" step="0.1" min="0.001" value="${+(tf.s || 1)}"></label></div></div>` : ""}`;
   $(".name", el).onchange = (e) => design.update(one.id, { name: e.target.value.trim() || one.name });
+  el.querySelectorAll("[data-axis]").forEach((b) => b.onclick = () => design.update(one.id, { params: { axis: b.dataset.axis } }));
+  el.querySelectorAll("[data-do]").forEach((b) => b.onclick = () => act(b.dataset.do));
   el.querySelectorAll("[data-param]").forEach((inp) => inp.onchange = () => {
+    if (inp.dataset.text !== undefined) { design.update(one.id, { params: { [inp.dataset.param]: inp.value } }); return; }
     const v = Number(inp.value);
-    if (!(v >= 0)) return;
+    if (!Number.isFinite(v) || (v < 0 && inp.dataset.param !== "distance")) return;
     design.update(one.id, { params: { [inp.dataset.param]: inp.dataset.param === "sides" ? Math.round(v) : v } });
   });
   el.querySelectorAll("[data-pos]").forEach((inp) => inp.onchange = () => { const p = [...one.tf.p]; p[+inp.dataset.pos] = Number(inp.value) || 0; design.update(one.id, { tf: { p } }); });
@@ -387,6 +407,270 @@ function setColor(c) {
   design.checkpoint();
   for (const id of selection) { const p = design.find(id); if (p) p.color = c; }
   design.emit("update");
+}
+
+// ---------- Tools that take a few clicks: sketching, extrude/revolve, fillet/chamfer/shell/press-pull, measuring ----------
+let tool = null;
+const isSolid = (p) => p && !["mesh", "sketch"].includes(p.kind);
+const displayNode = (p) => ({ ...p, tf: undefined, name: undefined, id: undefined, color: undefined });
+
+function toolPanel(title, body, buttons = []) {
+  const el = $("#props");
+  el.hidden = false;
+  el.innerHTML = `<div class="lbl">${esc(title)}</div><div class="tool-body">${body}</div><div style="display:flex;gap:6px;flex-wrap:wrap">${buttons.map(([id, label, cls]) => `<button class="btn ${cls || ""}" data-tb="${id}">${esc(label)}</button>`).join("")}</div>`;
+  $("#quick").hidden = true;
+  return el;
+}
+
+function beginTool(t) {
+  endTool();
+  view.stopPlacing();
+  tool = t;
+  view.setSelection(selection);
+}
+
+function endTool() {
+  if (!tool) return;
+  const t = tool;
+  tool = null;
+  if (t.cleanup) t.cleanup();
+  view.setGroundTool(null);
+  view.setSurfaceTool(null);
+  view.setPreview(null);
+  view.clearHighlights();
+  setHint();
+  refreshSelectionUI();
+}
+
+const fmt = (v) => (Math.round(v * 100) / 100).toString();
+
+function startSketch(type) {
+  const label = { rect: "Rectangle", circle2: "Circle", ngon: "Polygon", poly: "Polyline" }[type];
+  let pts = [];
+  const sides = () => Math.max(3, Math.min(64, Math.round(Number(settings.ngonSides) || 6)));
+  const z = 0.06;
+  const seg = (list, closed) => {
+    const out = [];
+    for (let i = 0; i < list.length - (closed ? 0 : 1); i++) {
+      const a = list[i], b = list[(i + 1) % list.length];
+      out.push(a[0], a[1], z, b[0], b[1], z);
+    }
+    return out;
+  };
+  const ring = (cx, cy, r, n, rot = 0) => Array.from({ length: n }, (_, i) => { const a = (i / n) * Math.PI * 2 + rot; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; });
+  const help = {
+    rect: "Click one corner on the grid, then the opposite corner.",
+    circle2: "Click the centre, then click to set the size.",
+    ngon: "Click the centre, then click to set the size.",
+    poly: "Click each corner. Click the first point again, double-click, or press Enter to finish.",
+  }[type];
+  const panel = () => {
+    const el = toolPanel(`Sketch: ${label}`, `<div style="font-size:13px;color:#5d656e;line-height:1.5">${help}</div><div data-live style="font-size:13px;font-weight:600"></div>${type === "ngon" ? `<div class="fields"><label>Sides<input data-sides type="number" min="3" max="64" value="${sides()}"></label></div>` : ""}`, [["done", "Done", "pri"]]);
+    $("[data-tb=done]", el).onclick = () => endTool();
+    const sd = $("[data-sides]", el);
+    if (sd) sd.onchange = () => setSetting("ngonSides", Math.max(3, Math.min(64, Math.round(Number(sd.value) || 6))));
+  };
+  const live = (t) => { const el = $("#props [data-live]"); if (el) el.textContent = t; };
+  const finishPoly = () => {
+    if (pts.length < 3) { toast("A polyline needs at least three corners."); return; }
+    const made = design.addSketch({ type: "poly", points: pts.map((p) => [p[0], p[1]]) });
+    pts = [];
+    view.setPreview(null);
+    selection = [made.id];
+    view.setSelection(selection);
+  };
+  beginTool({ name: "sketch", enter: () => type === "poly" && finishPoly() });
+  panel();
+  setHint(`${help} Esc when you're done.`);
+  view.setGroundTool({
+    move(p) {
+      if (!pts.length) { view.setPreview([p[0] - 2, p[1], z, p[0] + 2, p[1], z, p[0], p[1] - 2, z, p[0], p[1] + 2, z]); return; }
+      const a = pts[0];
+      if (type === "rect") { view.setPreview(seg([[a[0], a[1]], [p[0], a[1]], [p[0], p[1]], [a[0], p[1]]], true)); live(`${fmt(Math.abs(p[0] - a[0]))} × ${fmt(Math.abs(p[1] - a[1]))} mm`); }
+      else if (type === "circle2" || type === "ngon") {
+        const r = Math.hypot(p[0] - a[0], p[1] - a[1]);
+        view.setPreview(seg(ring(a[0], a[1], r, type === "circle2" ? 64 : sides(), type === "ngon" ? Math.PI / 2 : 0), true));
+        live(`${type === "circle2" ? "Diameter" : "Size"} ${fmt(r * 2)} mm`);
+      } else {
+        view.setPreview(seg([...pts, p], false));
+        const b = pts[pts.length - 1];
+        live(`Line ${fmt(Math.hypot(p[0] - b[0], p[1] - b[1]))} mm`);
+      }
+    },
+    click(p) {
+      if (type === "poly") {
+        if (pts.length >= 3 && Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) < Math.max(1.5, snapSize() * 1.5)) { finishPoly(); return; }
+        const last = pts[pts.length - 1];
+        if (!last || last[0] !== p[0] || last[1] !== p[1]) pts.push(p);
+        return;
+      }
+      if (!pts.length) { pts = [p]; return; }
+      const a = pts[0];
+      let shape = null;
+      if (type === "rect") {
+        const w = Math.abs(p[0] - a[0]), hh = Math.abs(p[1] - a[1]);
+        if (w > 0.01 && hh > 0.01) shape = { type: "rect", x: Math.min(a[0], p[0]), y: Math.min(a[1], p[1]), w, h: hh };
+      } else {
+        const r = Math.hypot(p[0] - a[0], p[1] - a[1]);
+        if (r > 0.01) shape = type === "circle2" ? { type: "circle", x: a[0], y: a[1], r } : { type: "ngon", x: a[0], y: a[1], r, sides: sides() };
+      }
+      pts = [];
+      view.setPreview(null);
+      if (shape) { const made = design.addSketch(shape); selection = [made.id]; view.setSelection(selection); }
+    },
+    dbl() { if (type === "poly") { pts.pop(); finishPoly(); } },
+  });
+}
+
+function constructTool(kind) {
+  let ids = selection.filter((id) => { const p = design.find(id); return p && p.kind === "sketch"; });
+  if (!ids.length) {
+    const sketches = design.parts.filter((p) => p.kind === "sketch");
+    if (sketches.length === 1) ids = [sketches[0].id];
+    else { toast(sketches.length ? "Pick the sketch to use (Shift-click to use several)." : "Draw a sketch first, from the Sketch menu."); return; }
+  }
+  const el = toolPanel(kind === "extrude" ? "Extrude" : "Revolve", kind === "extrude"
+    ? `<div style="font-size:13px;color:#5d656e">Pushes the sketch up into a solid. Use a minus number to go down.</div><div class="fields"><label>Distance (mm)<input data-v type="number" step="${snapSize()}" value="${settings.extrudeDistance || 10}"></label></div>`
+    : `<div style="font-size:13px;color:#5d656e">Spins the sketch around one of its own lines through the grid's centre. Keep the sketch on one side of that line.</div><div class="fields"><label>Angle (°)<input data-v type="number" step="15" min="1" max="360" value="360"></label></div><div class="seg"><button data-axis="y" class="on">Up line (Y)</button><button data-axis="x">Side line (X)</button></div>`,
+    [["ok", kind === "extrude" ? "Extrude" : "Revolve", "pri"], ["cancel", "Cancel"]]);
+  let axis = "y";
+  el.querySelectorAll("[data-axis]").forEach((b) => b.onclick = () => { axis = b.dataset.axis; el.querySelectorAll("[data-axis]").forEach((x) => x.classList.toggle("on", x === b)); });
+  const apply = () => {
+    const v = Number($("[data-v]", el).value);
+    if (!v) { toast("Type a distance first."); return; }
+    endTool();
+    if (kind === "extrude") setSetting("extrudeDistance", v);
+    const made = design.construct(kind, ids, kind === "extrude" ? { distance: v } : { angle: v, axis });
+    select([made.id]);
+  };
+  beginTool({ name: kind, enter: apply });
+  $("[data-tb=ok]", el).onclick = apply;
+  $("[data-tb=cancel]", el).onclick = endTool;
+  $("[data-v]", el).focus();
+}
+
+function modifyTool(op) {
+  const first = selection.length === 1 ? design.find(selection[0]) : null;
+  let target = isSolid(first) ? first : null;
+  const picks = new Map(); // index -> highlight
+  const what = op === "fillet" || op === "chamfer" ? "edges" : "faces";
+  const one = op === "pushpull";
+  const field = { fillet: ["r", "Radius (mm)", 2], chamfer: ["r", "Distance (mm)", 1], shell: ["thickness", "Wall (mm)", 2], pushpull: ["distance", "Distance (mm)", 5] }[op];
+  const help = {
+    fillet: "Click the edges to round. Click again to unpick.",
+    chamfer: "Click the edges to bevel. Click again to unpick.",
+    shell: "Click the faces to leave open (or none for a closed hollow).",
+    pushpull: "Click a flat face. Plus numbers pull it out, minus numbers push it in.",
+  }[op];
+  const el = toolPanel(MODIFY_LABELS[op], `<div style="font-size:13px;color:#5d656e;line-height:1.5">${help}</div><div data-count style="font-size:13px;font-weight:600"></div><div class="fields"><label>${field[1]}<input data-v type="number" step="0.5" value="${settings[`${op}Value`] ?? field[2]}"></label></div>`, [["ok", "Apply", "pri"], ["cancel", "Cancel"]]);
+  const count = () => { $("[data-count]", el).textContent = target ? `${target.name}: ${picks.size} ${picks.size === 1 ? what.slice(0, -1) : what} picked` : "Click the part to work on."; };
+  const redraw = () => { if (target) view.setHighlights(target.id, [...picks.values()]); count(); };
+  const apply = () => {
+    const v = Number($("[data-v]", el).value);
+    if (!target) { toast("Click a part first."); return; }
+    if (!picks.size && op !== "shell") { toast(`Pick at least one ${what.slice(0, -1)}.`); return; }
+    if (!Number.isFinite(v) || (op !== "pushpull" && v <= 0)) { toast("Type a size first."); return; }
+    setSetting(`${op}Value`, v);
+    const id = target.id, chosen = [...picks.keys()];
+    endTool();
+    const made = design.modify(id, op, chosen, { [field[0]]: v });
+    select([made.id]);
+  };
+  beginTool({ name: op, enter: apply });
+  $("[data-tb=ok]", el).onclick = apply;
+  $("[data-tb=cancel]", el).onclick = endTool;
+  count();
+  setHint(help);
+  view.setSurfaceTool({
+    async click(hit) {
+      const part = design.find(hit.partId);
+      if (!isSolid(part)) { toast(part && part.kind === "mesh" ? "That's a mesh model; this works on solids." : "Click a solid part."); return; }
+      if (target && part.id !== target.id) { picks.clear(); }
+      target = part;
+      selection = [part.id];
+      view.setSelection(selection);
+      try {
+        const r = what === "edges" ? await kernel.pickEdge(displayNode(part), hit.local) : await kernel.pickFace(displayNode(part), hit.local);
+        if (op === "pushpull" && r.type !== "PLANE") { toast("Press/Pull works on flat faces for now."); return; }
+        if (picks.has(r.index)) picks.delete(r.index);
+        else { if (one) picks.clear(); picks.set(r.index, what === "edges" ? { lines: r.lines } : { vertices: r.vertices, triangles: r.triangles }); }
+        redraw();
+      } catch (err) { toast(err.message || String(err), true); }
+    },
+  });
+}
+
+async function patternDialog(kind) {
+  const ids = selection.slice();
+  if (!ids.length) { toast("Pick the parts to copy first."); return; }
+  const box = new THREE.Box3();
+  ids.forEach((id) => { const g = view.groups.get(id); if (g) box.expandByObject(g); });
+  const size = box.isEmpty() ? new THREE.Vector3(20, 20, 0) : box.getSize(new THREE.Vector3());
+  const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+  const body = kind === "rectpattern"
+    ? `<div class="fields"><label>Across (X)<input data-k="nx" type="number" min="1" value="3"></label><label>Spacing X (mm)<input data-k="dx" type="number" value="${fmt(size.x + 5)}"></label><label></label><label>Back (Y)<input data-k="ny" type="number" min="1" value="1"></label><label>Spacing Y (mm)<input data-k="dy" type="number" value="${fmt(size.y + 5)}"></label></div>`
+    : `<div class="fields"><label>How many<input data-k="count" type="number" min="2" value="6"></label><label>Around (°)<input data-k="angle" type="number" min="1" max="360" value="360"></label></div><div class="seg"><button data-c="grid" class="on">Around the grid's centre</button><button data-c="part">Around the parts' centre</button></div>`;
+  const m = modal(kind === "rectpattern" ? "Rectangular pattern" : "Circular pattern", body, [["Cancel", null], ["Make copies", true, "pri"]]);
+  let around = "grid";
+  m.body.querySelectorAll("[data-c]").forEach((b) => b.onclick = () => { around = b.dataset.c; m.body.querySelectorAll("[data-c]").forEach((x) => x.classList.toggle("on", x === b)); });
+  const vals = () => Object.fromEntries([...m.body.querySelectorAll("[data-k]")].map((i) => [i.dataset.k, Number(i.value)]));
+  const ok = await new Promise((r) => { m.onClose = r; m.foot.lastChild.onclick = () => { m.vals = vals(); m.close(true); }; });
+  if (!ok) return;
+  const v = m.vals;
+  const made = kind === "rectpattern"
+    ? design.pattern(ids, "rect", { nx: Math.max(1, Math.round(v.nx || 1)), ny: Math.max(1, Math.round(v.ny || 1)), dx: v.dx || 0, dy: v.dy || 0 })
+    : design.pattern(ids, "circ", { count: Math.max(2, Math.round(v.count || 2)), angle: Math.max(1, Math.min(360, v.angle || 360)), center: around === "grid" ? [0, 0] : [c.x, c.y] });
+  select([...ids, ...made.map((p) => p.id)]);
+  toast(`Made ${made.length} cop${made.length === 1 ? "y" : "ies"}.`);
+}
+
+async function mirrorDialog() {
+  const ids = selection.slice();
+  if (!ids.length) { toast("Pick the parts to mirror first."); return; }
+  const m = modal("Mirror", `<div style="font-size:13px;color:#5d656e">Makes a mirrored copy of each picked part, flipped across its own middle.</div><div class="seg"><button data-p="YZ" class="on">Left ↔ right</button><button data-p="XZ">Front ↔ back</button><button data-p="XY">Top ↔ bottom</button></div>`, [["Cancel", null], ["Mirror", true, "pri"]]);
+  let plane = "YZ";
+  m.body.querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { plane = b.dataset.p; m.body.querySelectorAll("[data-p]").forEach((x) => x.classList.toggle("on", x === b)); });
+  const ok = await new Promise((r) => { m.onClose = r; });
+  if (!ok) return;
+  const centers = ids.map((id) => {
+    const g = view.groups.get(id);
+    const b = g ? new THREE.Box3().expandByObject(g) : null;
+    const cc = b && !b.isEmpty() ? b.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+    return [cc.x, cc.y, cc.z];
+  });
+  const made = design.mirror(ids, plane, centers);
+  // The copy lands on top of the original: move it beside it, along the mirror's direction.
+  const axis = { YZ: 0, XZ: 1, XY: 2 }[plane];
+  design.checkpoint(); design.undoStack.pop();
+  made.forEach((p, k) => {
+    const g = view.groups.get(ids[k]);
+    const b = g ? new THREE.Box3().expandByObject(g) : null;
+    const span = b && !b.isEmpty() ? b.getSize(new THREE.Vector3()).getComponent(axis) : 20;
+    if (axis !== 2) p.tf.p[axis] += span + 5;
+  });
+  design.emit("update");
+  select(made.map((p) => p.id));
+}
+
+function measureTool() {
+  let a = null;
+  const el = toolPanel("Measure", `<div style="font-size:13px;color:#5d656e">Click two points on parts or on the grid.</div><div data-out style="font-size:14px;line-height:1.7"></div>`, [["done", "Done", "pri"]]);
+  $("[data-tb=done]", el).onclick = endTool;
+  beginTool({ name: "measure" });
+  setHint("Click two points to measure between them.");
+  const out = $("[data-out]", el);
+  view.setSurfaceTool({
+    ground: true,
+    click(hit) {
+      const p = hit.world;
+      if (!a) { a = p; view.setPreview([p[0] - 1.5, p[1], p[2], p[0] + 1.5, p[1], p[2], p[0], p[1] - 1.5, p[2], p[0], p[1] + 1.5, p[2]], 0xd94f00); out.textContent = "Now click the second point."; return; }
+      const d = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+      view.setPreview([...a, ...p], 0xd94f00);
+      out.innerHTML = `<b style="font-size:18px">${fmt(Math.hypot(...d))} mm</b><br>X ${fmt(Math.abs(d[0]))} · Y ${fmt(Math.abs(d[1]))} · Z ${fmt(Math.abs(d[2]))} mm`;
+      window.hcad.lastMeasure = Math.hypot(...d);
+      a = null;
+    },
+  });
 }
 
 // ---------- Actions ----------
@@ -407,10 +691,28 @@ async function act(name) {
       }
       case "separate": {
         const one = selection.length === 1 && design.find(selection[0]);
-        if (!one || one.kind !== "boolean") { toast("Pick a joined, subtracted or intersected part to separate."); break; }
+        if (!one || !(one.kind === "boolean" || (one.kind === "modify" && one.op !== "mirror"))) { toast("Pick a joined, subtracted, intersected or filleted part to separate."); break; }
         select(design.separate(one.id).map((p) => p.id));
         break;
       }
+      case "rect": case "circle2": case "ngon": case "poly": startSketch(name); break;
+      case "extrude": case "revolve": constructTool(name); break;
+      case "pushpull": case "fillet": case "chamfer": case "shell": modifyTool(name); break;
+      case "rectpattern": case "circpattern": await patternDialog(name); break;
+      case "mirror": await mirrorDialog(); break;
+      case "group": {
+        if (selection.length < 2) { toast("Shift-click two or more parts to group them."); break; }
+        select([design.combine("group", selection).id]);
+        break;
+      }
+      case "ungroup": {
+        const g = selection.length === 1 && design.find(selection[0]);
+        if (!g || g.op !== "group") { toast("Pick a group to ungroup."); break; }
+        select(design.separate(g.id).map((p) => p.id));
+        break;
+      }
+      case "measure": measureTool(); break;
+      case "text": startPlacing("text"); break;
       case "new": if (await okToDiscard()) { design.clear(); filePath = null; select([]); refreshTitle(); view.setView("home"); } break;
       case "open": await openDesign(); break;
       case "import": await importModels(); break;
@@ -634,17 +936,18 @@ document.addEventListener("keydown", (e) => {
   const typing = e.target.closest("input, textarea, select");
   const ctrl = e.ctrlKey || e.metaKey;
   const k = e.key.toLowerCase();
-  if (ctrl && k === "z" && !e.shiftKey) { e.preventDefault(); act("undo"); return; }
-  if (ctrl && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); act("redo"); return; }
+  if (k === "escape") { closeMenus(); if (tool) endTool(); else if (view.placing) stopPlacing(); else if (!typing) select([]); return; }
+  if (ctrl && k === "z" && !e.shiftKey && !typing) { e.preventDefault(); act("undo"); return; }
+  if (ctrl && (k === "y" || (k === "z" && e.shiftKey)) && !typing) { e.preventDefault(); act("redo"); return; }
   if (ctrl && k === "s") { e.preventDefault(); act(e.shiftKey ? "saveas" : "save"); return; }
   if (ctrl && k === "o") { e.preventDefault(); act("open"); return; }
   if (ctrl && k === "n") { e.preventDefault(); act("new"); return; }
   if (ctrl && k === "i") { e.preventDefault(); act("import"); return; }
   if (ctrl && k === "e") { e.preventDefault(); act("export"); return; }
+  if (k === "enter" && tool && tool.enter && (!typing || typing.closest("#props"))) { e.preventDefault(); tool.enter(); return; }
   if (typing) return;
   if (ctrl && k === "d") { e.preventDefault(); act("duplicate"); return; }
   if (ctrl && k === "a") { e.preventDefault(); select(design.parts.map((p) => p.id)); return; }
-  if (k === "escape") { closeMenus(); if (view.placing) stopPlacing(); else select([]); return; }
   if (k === "delete" || k === "backspace") { act("delete"); return; }
   if (k === "m") act("move");
   if (k === "r") act("rotate");
@@ -672,7 +975,7 @@ const view = new Viewport($("#view"), {
   onDragInfo: (t) => { const d = $("#draginfo"); d.hidden = !t; d.textContent = t; },
 });
 
-window.hcad = { design, view, act, select, idle, convertOne, importPaths, files, readModel, writeModel, kernel, DesignClass, get selection() { return selection; }, synced: 0, ready: false };
+window.hcad = { design, view, act, select, idle, endTool, get tool() { return tool; }, convertOne, importPaths, files, readModel, writeModel, kernel, DesignClass, get selection() { return selection; }, synced: 0, ready: false };
 
 async function main() {
   buildTopbar();

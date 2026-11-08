@@ -9,6 +9,7 @@
     "test:smoke": "node tests/smoke.mjs"
   },
   "dependencies": {
+    "dejavu-fonts-ttf": "2.37.3",
     "replicad": "1.2.1",
     "replicad-opencascadejs": "1.2.1",
     "three": "0.187.0"

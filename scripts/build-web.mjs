@@ -32,6 +32,11 @@ const wasm = join(dirname(require.resolve("replicad-opencascadejs/package.json")
 if (!existsSync(wasm)) throw new Error("replicad_single.wasm is missing from replicad-opencascadejs");
 cpSync(wasm, join(out, "replicad_single.wasm"));
 
+// The letters for the Text tool (DejaVu Sans Bold, free to share).
+const fontDir = join(dirname(require.resolve("dejavu-fonts-ttf/package.json")), "ttf");
+mkdirSync(join(out, "fonts"), { recursive: true });
+cpSync(join(fontDir, "DejaVuSans-Bold.ttf"), join(out, "fonts", "DejaVuSans-Bold.ttf"));
+
 for (const f of ["app.js", "kernel.worker.js", "replicad_single.wasm"]) {
   console.log(`${f}: ${(statSync(join(out, f)).size / 1048576).toFixed(1)} MB`);
 }

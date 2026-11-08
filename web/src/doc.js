@@ -10,13 +10,21 @@ export const KINDS = {
   torus: { label: "Torus", params: { R: 10, r: 3 } },
   wedge: { label: "Wedge", params: { w: 20, d: 20, h: 20 } },
   prism: { label: "Prism", params: { r: 10, sides: 6, h: 20 } },
+  text: { label: "Text", params: { text: "Hearth", size: 10, depth: 3 } },
+};
+
+export const MODIFY_LABELS = { fillet: "Fillet", chamfer: "Chamfer", shell: "Shell", pushpull: "Press/Pull", mirror: "Mirror" };
+export const MODIFY_PARAMS = {
+  fillet: { r: "Radius" }, chamfer: { r: "Distance" }, shell: { thickness: "Wall" }, pushpull: { distance: "Distance" },
+  extrude: { distance: "Distance" }, revolve: { angle: "Angle" },
 };
 
 export const PARAM_LABELS = {
   w: "Width", d: "Depth", h: "Height", r: "Radius", r1: "Bottom radius", r2: "Top radius", R: "Ring radius", sides: "Sides",
+  text: "Text", size: "Letter size", depth: "Thickness",
 };
 
-export const OP_LABELS = { join: "Joined", subtract: "Subtracted", intersect: "Intersected" };
+export const OP_LABELS = { join: "Joined", subtract: "Subtracted", intersect: "Intersected", group: "Group" };
 
 const COLORS = ["#7fb2e6", "#e8a35f", "#86c98f", "#d98bd0", "#e6d36e", "#8fd3d6", "#e68383"];
 
@@ -138,14 +146,16 @@ export class Design {
     return made;
   }
 
-  // Join, subtract (the first part keeps, the others cut it) or intersect. The parts go inside the new one.
+  // Join, subtract (the first part keeps, the others cut it), intersect or group. The parts go inside the new one.
   combine(op, ids) {
     const parts = ids.map((id) => this.find(id)).filter(Boolean);
     if (parts.length < 2) throw new Error("Pick at least two parts.");
-    if (parts.some((p) => p.kind === "mesh")) throw new Error("Mesh models (STL, OBJ…) can't be combined yet. That's coming in a later update.");
+    if (parts.some((p) => p.kind === "mesh")) throw new Error(`Mesh models (STL, OBJ…) can't be ${op === "group" ? "grouped" : "combined"} yet. That's coming in a later update.`);
+    if (parts.some((p) => p.kind === "sketch")) throw new Error("Sketches are flat. Extrude them first, then combine.");
     const first = parts[0];
+    const groupN = this.parts.filter((p) => p.op === "group").length + 1;
     const part = {
-      id: newId(), name: `${first.name} (${OP_LABELS[op].toLowerCase()})`, kind: "boolean", op,
+      id: newId(), name: op === "group" ? `Group ${groupN}` : `${first.name} (${OP_LABELS[op].toLowerCase()})`, kind: "boolean", op,
       children: parts.map((p) => JSON.parse(JSON.stringify(p))),
       tf: { p: [0, 0, 0], r: [0, 0, 0], s: 1 }, color: first.color,
     };
@@ -158,9 +168,17 @@ export class Design {
     return part;
   }
 
-  // Undoes a combine on one part, putting its pieces back where they were.
+  // Undoes a combine on one part, putting its pieces back where they were; on a fillet, shell or press/pull it takes
+  // that change off again.
   separate(id) {
     const part = this.find(id);
+    if (part && part.kind === "modify" && part.op !== "mirror") {
+      this.checkpoint();
+      const child = JSON.parse(JSON.stringify(part.child));
+      this.parts.splice(this.parts.indexOf(part), 1, child);
+      this.emit("separate");
+      return [child];
+    }
     if (!part || part.kind !== "boolean") return [];
     this.checkpoint();
     const i = this.parts.indexOf(part);
@@ -172,6 +190,111 @@ export class Design {
     this.parts.splice(i, 1, ...kids);
     this.emit("separate");
     return kids;
+  }
+
+  addSketch(shape) {
+    const n = this.parts.filter((p) => p.kind === "sketch").length + 1;
+    const part = { id: newId(), name: `Sketch ${n}`, kind: "sketch", shapes: [shape], tf: { p: [0, 0, 0], r: [0, 0, 0], s: 1 }, color: "#2b7bd6" };
+    this.checkpoint();
+    this.parts.push(part);
+    this.emit("add");
+    return part;
+  }
+
+  // Extrude or revolve one or more sketches into a solid. Sketches that were only moved (not turned) are merged.
+  construct(kind, ids, params) {
+    const sks = ids.map((id) => this.find(id)).filter((p) => p && p.kind === "sketch");
+    if (!sks.length) throw new Error("Pick a sketch first (draw one from the Sketch menu).");
+    const base = sks[0];
+    const turned = (p) => (p.tf.r || []).some((v) => v) || (p.tf.s || 1) !== 1;
+    if (sks.length > 1 && sks.some(turned)) throw new Error("Those sketches are turned differently; extrude them one at a time.");
+    const shapes = [];
+    for (const sk of sks) {
+      const d = sk.tf.p.map((v, i) => v - base.tf.p[i]);
+      for (const sh of sk.shapes) shapes.push(shiftShape(sh, d[0], d[1]));
+    }
+    const n = this.parts.filter((p) => p.kind === kind).length + 1;
+    const part = {
+      id: newId(), name: `${kind === "extrude" ? "Extrusion" : "Revolve"} ${n}`, kind,
+      sketch: { kind: "sketch", shapes, tf: JSON.parse(JSON.stringify(base.tf)) },
+      params: { ...params }, tf: { p: [0, 0, 0], r: [0, 0, 0], s: 1 }, color: this.nextColor(),
+    };
+    this.checkpoint();
+    const set = new Set(sks.map((s) => s.id));
+    const at = this.parts.findIndex((p) => set.has(p.id));
+    this.parts = this.parts.filter((p) => !set.has(p.id));
+    this.parts.splice(Math.max(0, at), 0, part);
+    this.emit("construct");
+    return part;
+  }
+
+  // Fillet, chamfer, shell or press/pull a solid part (the picks are its edge or face numbers).
+  modify(id, op, picks, params) {
+    const part = this.find(id);
+    if (!part) throw new Error("Pick a part first.");
+    if (part.kind === "mesh" || part.kind === "sketch") throw new Error(`${MODIFY_LABELS[op]} works on solids, not on ${part.kind === "mesh" ? "mesh models" : "sketches"}.`);
+    const node = {
+      id: newId(), name: part.name, kind: "modify", op, child: JSON.parse(JSON.stringify(part)), picks: [...picks],
+      params: { ...params }, tf: { p: [0, 0, 0], r: [0, 0, 0], s: 1 }, color: part.color,
+    };
+    this.checkpoint();
+    this.parts.splice(this.parts.indexOf(part), 1, node);
+    this.emit("modify");
+    return node;
+  }
+
+  // Mirrored copies, across the part's own middle.
+  mirror(ids, plane, centers) {
+    const made = [];
+    this.checkpoint();
+    ids.forEach((id, k) => {
+      const part = this.find(id);
+      if (!part || part.kind === "mesh" || part.kind === "sketch") return;
+      const node = {
+        id: newId(), name: `${part.name} mirrored`, kind: "modify", op: "mirror", child: JSON.parse(JSON.stringify(part)),
+        picks: [], params: { plane, origin: centers[k] }, tf: { p: [0, 0, 0], r: [0, 0, 0], s: 1 }, color: part.color,
+      };
+      reid(node.child);
+      this.parts.push(node);
+      made.push(node);
+    });
+    if (!made.length) { this.undoStack.pop(); throw new Error("Mirror works on solids (not mesh models or sketches) for now."); }
+    this.emit("add");
+    return made;
+  }
+
+  // Copies in rows and columns, or around a centre. Returns the new parts.
+  pattern(ids, kind, o) {
+    const made = [];
+    this.checkpoint();
+    for (const id of ids) {
+      const src = this.find(id);
+      if (!src) continue;
+      const copies = [];
+      if (kind === "rect") {
+        for (let i = 0; i < o.nx; i++) for (let j = 0; j < o.ny; j++) if (i || j) copies.push({ dp: [i * o.dx, j * o.dy, 0], rz: 0 });
+      } else {
+        const step = o.angle / (o.angle >= 360 ? o.count : Math.max(1, o.count - 1));
+        for (let i = 1; i < o.count; i++) copies.push({ rz: step * i });
+      }
+      copies.forEach((c, k) => {
+        const copy = JSON.parse(JSON.stringify(src));
+        reid(copy);
+        copy.name = `${src.name} ${k + 2}`;
+        if (kind === "rect") copy.tf.p = copy.tf.p.map((v, i) => v + c.dp[i]);
+        else {
+          const a = (c.rz * Math.PI) / 180;
+          const [cx, cy] = o.center;
+          const x = copy.tf.p[0] - cx, y = copy.tf.p[1] - cy;
+          copy.tf.p = [cx + x * Math.cos(a) - y * Math.sin(a), cy + x * Math.sin(a) + y * Math.cos(a), copy.tf.p[2]];
+          copy.tf.r = [copy.tf.r[0], copy.tf.r[1], (copy.tf.r[2] || 0) + c.rz];
+        }
+        this.parts.push(copy);
+        made.push(copy);
+      });
+    }
+    this.emit("add");
+    return made;
   }
 
   clear() {
@@ -215,6 +338,14 @@ export class Design {
 function reid(p) {
   p.id = newId();
   (p.children || []).forEach(reid);
+  if (p.child) reid(p.child);
+}
+
+function shiftShape(sh, dx, dy) {
+  const c = JSON.parse(JSON.stringify(sh));
+  if (c.type === "poly") c.points = c.points.map(([x, y]) => [x + dx, y + dy]);
+  else { c.x += dx; c.y += dy; }
+  return c;
 }
 
 // A part's placement inside a combined part, written as a placement of its own (only when the combined part was

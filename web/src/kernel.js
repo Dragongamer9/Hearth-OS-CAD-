@@ -37,3 +37,6 @@ export const mesh = (node) => call("mesh", { node });
 export const exportMesh = (node, quality) => call("exportMesh", { node, quality });
 export const exportSTEP = (nodes) => call("exportSTEP", { nodes });
 export const importSTEP = (bytes) => call("importSTEP", { bytes }, [bytes.buffer]);
+export const pickFace = (node, point) => call("pickFace", { node, point });
+export const pickEdge = (node, point) => call("pickEdge", { node, point });
+export const outline = (node, edges) => call("outline", { node, edges });

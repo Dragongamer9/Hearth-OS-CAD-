@@ -160,6 +160,97 @@ try {
   check(undo.empty === 0 && undo.back === undo.n, `undo and redo (${undo.steps} steps)`);
   await page.waitForTimeout(1500);
 
+
+  // Stage 2: sketches, extrude/revolve, fillet/chamfer/shell/press-pull, text, groups, mirror and patterns.
+  const s2 = await page.evaluate(async () => {
+    const h = window.hcad, d = h.design, k = h.kernel;
+    const node = (p) => ({ ...p, tf: undefined, name: undefined, id: undefined, color: undefined });
+    const size = async (p) => (await k.call("volume", { node: p })).size.map((v) => Math.round(v * 100) / 100);
+    const tris = async (p) => (await k.mesh(node(p))).triangles.length / 3;
+    const r = {};
+    const run = async (name, fn) => { try { r[name] = await fn(); } catch (e) { r[name] = "ERROR " + (e.message || e); } };
+    d.clear();
+    await run("extrude", async () => {
+      const a = d.addSketch({ type: "rect", x: -20, y: -15, w: 40, h: 30 });
+      d.update(a.id, { shapes: [...a.shapes, { type: "circle", x: 0, y: 0, r: 6 }] }, { record: false });
+      const ex = d.construct("extrude", [a.id], { distance: 12 });
+      return { size: await size(ex), tris: await tris(ex) };
+    });
+    await run("revolve", async () => {
+      const a = d.addSketch({ type: "rect", x: 8, y: 0, w: 4, h: 20 });
+      const rv = d.construct("revolve", [a.id], { angle: 360, axis: "y" });
+      return { size: await size(rv) };
+    });
+    const box = d.addShape("box", [60, 0, 0]);
+    await run("fillet", async () => {
+      const e = await k.pickEdge(node(box), [10, 10, 10]);
+      const f = d.modify(box.id, "fillet", [e.index], { r: 3 });
+      return { edge: e.index, tris: await tris(f) };
+    });
+    const box2 = d.addShape("box", [100, 0, 0]);
+    await run("chamfer", async () => { const e = await k.pickEdge(node(box2), [-10, 0, 20]); return { tris: await tris(d.modify(box2.id, "chamfer", [e.index], { r: 2 })) }; });
+    const box3 = d.addShape("box", [140, 0, 0]);
+    await run("shell", async () => { const f = await k.pickFace(node(box3), [0, 0, 20]); return { type: f.type, tris: await tris(d.modify(box3.id, "shell", [f.index], { thickness: 2 })) }; });
+    const box4 = d.addShape("box", [180, 0, 0]);
+    await run("pushpull", async () => { const f = await k.pickFace(node(box4), [0, 0, 20]); return { size: await size(d.modify(box4.id, "pushpull", [f.index], { distance: 5 })) }; });
+    await run("text", async () => ({ tris: await tris(d.addShape("text", [0, 60, 0])) }));
+    await run("group", async () => { const a = d.addShape("sphere", [0, -60, 0]), b = d.addShape("cone", [30, -60, 0]); return { tris: await tris(d.combine("group", [a.id, b.id])) }; });
+    await run("mirror", async () => { const w = d.addShape("wedge", [-60, -60, 0]); const [m] = d.mirror([w.id], "YZ", [[-60, -60, 10]]); return { tris: await tris(m) }; });
+    await run("pattern", async () => { const n0 = d.parts.length; d.pattern([d.addShape("cylinder", [-80, 40, 0], { r: 4, h: 8 }).id], "rect", { nx: 3, ny: 2, dx: 12, dy: 12 }); return { made: d.parts.length - n0 - 1 }; });
+    await h.idle();
+    return r;
+  });
+  console.log(JSON.stringify(s2));
+  const ok2 = (k, cond) => check(!String(s2[k]).startsWith("ERROR") && cond(s2[k]), `${k} (${typeof s2[k] === "string" ? s2[k] : JSON.stringify(s2[k])})`);
+  ok2("extrude", (v) => v.size && Math.abs(v.size[0] - 40) < 0.1 && Math.abs(v.size[2] - 12) < 0.1 && v.tris > 20);
+  ok2("revolve", (v) => v.size && Math.abs(v.size[0] - 24) < 0.2 && Math.abs(v.size[1] - 20) < 0.2);
+  ok2("fillet", (v) => v.tris > 12);
+  ok2("chamfer", (v) => v.tris > 12);
+  ok2("shell", (v) => v.type === "PLANE" && v.tris > 12);
+  ok2("pushpull", (v) => v.size && Math.abs(v.size[2] - 25) < 0.1);
+  ok2("text", (v) => v.tris > 20);
+  ok2("group", (v) => v.tris > 20);
+  ok2("mirror", (v) => v.tris > 4);
+  ok2("pattern", (v) => v.made === 5);
+  await page.evaluate(() => { window.hcad.select([]); window.hcad.view.fit(); });
+  await settle();
+  await shot("12-stage2-shapes.png");
+
+  // Drawing a rectangle sketch with the mouse, then measuring on the grid.
+  await page.evaluate(() => { window.hcad.design.clear(); window.hcad.view.setView("top"); window.hcad.act("rect"); });
+  await settle();
+  const before2 = await page.evaluate(() => window.hcad.design.parts.length);
+  await page.mouse.click(600, 400);
+  await page.mouse.move(800, 550);
+  await settle();
+  await shot("13-drawing-rectangle.png");
+  await page.mouse.click(800, 550);
+  await page.evaluate(() => window.hcad.idle());
+  const sk = await page.evaluate(() => window.hcad.design.parts.map((p) => p.kind));
+  check(sk.length === before2 + 1 && sk[sk.length - 1] === "sketch", `drew a rectangle sketch with the mouse (${sk.join(", ")})`);
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { window.hcad.select([window.hcad.design.parts[0].id]); window.hcad.act("extrude"); });
+  await settle();
+  await shot("14-extrude-panel.png");
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => window.hcad.idle());
+  const ex2 = await page.evaluate(() => window.hcad.design.parts.map((p) => p.kind));
+  check(ex2[0] === "extrude", `Enter extrudes the sketch (${ex2.join(", ")})`);
+  await page.evaluate(() => { window.hcad.view.setView("home"); window.hcad.select([window.hcad.design.parts[0].id]); window.hcad.act("fillet"); });
+  await settle();
+  await shot("15-fillet-panel.png");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => { window.hcad.select([]); window.hcad.view.setView("top"); window.hcad.act("measure"); });
+  await settle();
+  await page.mouse.click(400, 700);
+  await page.mouse.click(700, 700);
+  await settle();
+  await shot("16-measure.png");
+  const meas = await page.evaluate(() => window.hcad.lastMeasure || 0);
+  check(meas > 1, `measured between two points (${meas.toFixed(1)} mm)`);
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.hcad.view.setView("home"));
+
   // Dialogs and the main menu.
   await page.evaluate(() => { window.hcad.select([]); });
   await page.click(".logo");

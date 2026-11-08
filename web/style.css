@@ -153,3 +153,5 @@ button { font: inherit; }
 .job .st { margin-left: auto; font-weight: 600; }
 .job .st.ok { color: #23824a; } .job .st.bad { color: var(--danger); } .job .st.wait { color: var(--muted); }
 .snapopts { padding: 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+#props .tool-body { display: flex; flex-direction: column; gap: 8px; }
+.seg button { padding: 0 8px; }
