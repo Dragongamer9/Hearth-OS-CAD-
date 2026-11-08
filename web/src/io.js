@@ -69,36 +69,32 @@ export async function readModel(name, bytes) {
   switch (ext) {
     case "stl": {
       const positions = tri(new STLLoader().parse(buf));
-      dropOnGrid(positions);
-      return { kind: "mesh", positions };
+      return { kind: "mesh", positions, ...dropOnGrid(positions) };
     }
     case "ply": {
       const positions = tri(new PLYLoader().parse(buf));
-      dropOnGrid(positions);
-      return { kind: "mesh", positions };
+      return { kind: "mesh", positions, ...dropOnGrid(positions) };
     }
     case "obj": {
       const positions = sceneTriangles(new OBJLoader().parse(new TextDecoder().decode(bytes)));
-      dropOnGrid(positions);
-      return { kind: "mesh", positions };
+      return { kind: "mesh", positions, ...dropOnGrid(positions) };
     }
     case "3mf": {
       const positions = sceneTriangles(new ThreeMFLoader().parse(buf));
-      dropOnGrid(positions);
-      return { kind: "mesh", positions };
+      return { kind: "mesh", positions, ...dropOnGrid(positions) };
     }
     case "glb":
     case "gltf": {
       const gltf = await new GLTFLoader().parseAsync(buf, "");
       const positions = sceneTriangles(gltf.scene);
       fromYUpMetres(positions);
-      dropOnGrid(positions);
-      return { kind: "mesh", positions };
+      return { kind: "mesh", positions, ...dropOnGrid(positions) };
     }
     case "step":
     case "stp": {
       const r = await kernel.importSTEP(new Uint8Array(buf));
-      return { kind: "solid", brep: r.brep, mesh: r.mesh };
+      const [[x0, y0, z0], [x1, y1, z1]] = r.mesh.bounds;
+      return { kind: "solid", brep: r.brep, mesh: r.mesh, size: [x1 - x0, y1 - y0, z1 - z0], offset: [-(x0 + x1) / 2, -(y0 + y1) / 2, -z0] };
     }
     default:
       throw new Error(`Hearth OS CAD can't open .${ext} files yet.`);

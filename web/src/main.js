@@ -468,14 +468,20 @@ async function importModels() {
 
 async function importPaths(paths) {
   const made = [];
-  let x = 0;
+  // New models go in a row to the right of what's already there, so they never land inside each other.
+  const box = view.contentBox();
+  let x = box.isEmpty() ? null : box.max.x + 20;
   for (const path of paths) {
     const name = files.baseName(path).replace(/\.[^.]+$/, "");
     try {
       const model = await readModel(path, await files.readFile(path));
-      const part = model.kind === "solid" ? design.addSolid(name, model.brep, [x, 0, 0]) : design.addMesh(name, model.positions, [x, 0, 0]);
+      const w = (model.size && model.size[0]) || 20;
+      const cx = x === null ? 0 : x + w / 2;
+      x = (x === null ? w / 2 : x + w) + 20;
+      const part = model.kind === "solid"
+        ? design.addSolid(name, model.brep, [cx + model.offset[0], model.offset[1], model.offset[2]])
+        : design.addMesh(name, model.positions, [cx, 0, 0]);
       made.push(part.id);
-      x += 10;
     } catch (err) {
       toast(`${files.baseName(path)}: ${err.message || err}`, true);
     }

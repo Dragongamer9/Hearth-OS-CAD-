@@ -366,7 +366,7 @@ export class Viewport {
     return box;
   }
   contentCenter() { const b = this.contentBox(); return b.isEmpty() ? new THREE.Vector3(0, 0, 0) : b.getCenter(new THREE.Vector3()); }
-  contentRadius() { const b = this.contentBox(); return b.isEmpty() ? this.gridSize * 0.32 : b.getSize(new THREE.Vector3()).length() / 2; }
+  contentRadius() { const b = this.contentBox(); return b.isEmpty() ? this.gridSize * 0.42 : b.getSize(new THREE.Vector3()).length() / 2; }
 
   fit() {
     const t = this.contentCenter();
