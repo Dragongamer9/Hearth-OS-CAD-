@@ -8,7 +8,7 @@ import { partMatrix } from "./io.js";
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
 const BG = 0xf1f3f5;
-const SEL = new THREE.Color("#ffb020");
+const SEL = new THREE.Color("#2b7bd6");
 
 export class Viewport {
   constructor(el, { onPick, onPlace, onTransformEnd, onHover, onDragInfo }) {
@@ -153,10 +153,10 @@ export class Viewport {
     const sel = this.selected.has(g.userData.id);
     const { mesh, edges } = g.userData;
     mesh.material.wireframe = this.style === "wire";
-    mesh.material.emissive.copy(sel ? SEL : new THREE.Color(0)).multiplyScalar(sel ? 0.35 : 0);
+    mesh.material.emissive.copy(sel ? SEL : new THREE.Color(0)).multiplyScalar(sel ? 0.28 : 0);
     if (edges) {
       edges.visible = this.style !== "shaded";
-      edges.material.color.set(sel ? "#d98200" : "#2f3a45");
+      edges.material.color.set(sel ? "#ff9a00" : "#2f3a45");
     }
   }
 
@@ -366,7 +366,7 @@ export class Viewport {
     return box;
   }
   contentCenter() { const b = this.contentBox(); return b.isEmpty() ? new THREE.Vector3(0, 0, 0) : b.getCenter(new THREE.Vector3()); }
-  contentRadius() { const b = this.contentBox(); return b.isEmpty() ? 40 : b.getSize(new THREE.Vector3()).length() / 2; }
+  contentRadius() { const b = this.contentBox(); return b.isEmpty() ? this.gridSize * 0.32 : b.getSize(new THREE.Vector3()).length() / 2; }
 
   fit() {
     const t = this.contentCenter();

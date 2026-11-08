@@ -11,7 +11,7 @@
   "bundle": {
     "active": true,
     "targets": ["deb"],
-    "category": "Graphics",
+    "category": "GraphicsAndDesign",
     "shortDescription": "3D design in the style of 123D Design",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] } }

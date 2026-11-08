@@ -94,7 +94,7 @@ jobs:
         working-directory: app
         run: |
           set -o pipefail
-          npx --yes @tauri-apps/cli@2 build --bundles deb 2>&1 | tee ../build.log || { echo "::error title=Build::$(grep -E '^error' -A10 ../build.log | head -60 | tr '\n' '|' | cut -c1-3800)"; exit 1; }
+          npx --yes @tauri-apps/cli@2 build --bundles deb 2>&1 | tee ../build.log || { echo "::error title=Build::$(grep -iE '(^|\s)error' -A10 ../build.log | head -60 | tr '\n' '|' | cut -c1-3800)"; exit 1; }
           ls -la target/release/bundle/deb/
           echo "::notice title=Built::$(ls target/release/bundle/deb/*.deb | xargs -n1 basename) $(du -h target/release/bundle/deb/*.deb | cut -f1)"
       - name: The real window (WebKitGTK under Xvfb)
