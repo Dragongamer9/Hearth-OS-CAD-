@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearth OS CAD</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar"></header>
+  <main id="stage">
+    <div id="view"></div>
+    <div id="menus"></div>
+    <div id="cube"></div>
+    <nav id="navbar" aria-label="View navigation"></nav>
+    <div id="props" hidden></div>
+    <div id="quick" hidden></div>
+    <div id="draginfo" hidden></div>
+    <div id="hint"></div>
+    <div id="units"></div>
+    <div id="toasts" aria-live="polite"></div>
+    <div id="boot"><div class="boot-card"><div class="spinner"></div><div>Starting the geometry engine…</div></div></div>
+  </main>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

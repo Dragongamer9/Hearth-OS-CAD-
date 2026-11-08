@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Hearth OS CAD: a blue design cube resting in the Hearth fireplace arch, with a small flame. -->
+  <defs>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd166"/><stop offset=".55" stop-color="#ff8a3d"/><stop offset="1" stop-color="#e5483b"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#2f3237"/>
+  <path d="M112 420 V250 A144 144 0 0 1 400 250 V420" fill="none" stroke="#e6d8c8" stroke-width="28" stroke-linecap="round"/>
+  <path d="M84 444 H428" stroke="#e6d8c8" stroke-width="24" stroke-linecap="round"/>
+  <polygon points="256,200 352,252 256,304 160,252" fill="#a9cdee"/>
+  <polygon points="160,252 256,304 256,412 160,360" fill="#5f97cf"/>
+  <polygon points="352,252 256,304 256,412 352,360" fill="#3f78b3"/>
+  <path d="M256 92 C276 118 292 136 292 162 C292 182 276 196 256 196 C236 196 220 182 220 162 C220 146 228 134 238 124 C238 138 244 146 252 150 C248 128 248 110 256 92 Z" fill="url(#flame)"/>
+</svg>

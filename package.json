@@ -1,0 +1,20 @@
+{
+  "name": "hearth-os-cad",
+  "private": true,
+  "description": "Hearth OS CAD: the web side (bundled into app/ui by scripts/build-web.mjs)",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "test:smoke": "node tests/smoke.mjs"
+  },
+  "dependencies": {
+    "replicad": "1.2.1",
+    "replicad-opencascadejs": "1.2.1",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "playwright": "1.48.2"
+  }
+}

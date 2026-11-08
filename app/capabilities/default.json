@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The Hearth OS CAD window: its calls to the Rust side, its title (the design's name), and closing after asking about unsaved changes.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:window:allow-set-title", "core:window:allow-destroy", "core:window:allow-close"]
+}

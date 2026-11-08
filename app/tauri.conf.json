@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hearth OS CAD",
+  "identifier": "io.github.dragongamer9.hearth.cad",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "category": "Graphics",
+    "shortDescription": "3D design in the style of 123D Design",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] } }
+  }
+}

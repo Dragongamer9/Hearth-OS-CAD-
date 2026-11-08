@@ -1,0 +1,30 @@
+[package]
+name = "hearth-os-cad"
+# Placeholder: the owner picks the first real version number.
+version = "0.0.0"
+edition = "2021"
+description = "Hearth OS CAD: a 123D Design-style 3D CAD app for Hearth OS"
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "hearth_os_cad"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hearth-os-cad"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
