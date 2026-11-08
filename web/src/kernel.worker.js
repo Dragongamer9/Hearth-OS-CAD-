@@ -156,6 +156,10 @@ function buildRaw(node) {
     } else {
       const axis = node.params.axis === "x" ? [1, 0, 0] : [0, 1, 0];
       solid = sketch.revolve(axis, { origin: [0, 0, 0], angle: Math.max(1, Math.min(360, +node.params.angle || 360)) });
+      // Stand it up: the line it turned around becomes the up direction, and it sits on the grid (like a vase).
+      solid = node.params.axis === "x" ? solid.rotate(-90, [0, 0, 0], [0, 1, 0]) : solid.rotate(90, [0, 0, 0], [1, 0, 0]);
+      const z0 = solid.boundingBox.bounds[0][2];
+      if (Math.abs(z0) > 1e-9) solid = solid.translate([0, 0, -z0]);
     }
     return place(solid, sk.tf);
   }

@@ -203,7 +203,7 @@ try {
   console.log(JSON.stringify(s2));
   const ok2 = (k, cond) => check(!String(s2[k]).startsWith("ERROR") && cond(s2[k]), `${k} (${typeof s2[k] === "string" ? s2[k] : JSON.stringify(s2[k])})`);
   ok2("extrude", (v) => v.size && Math.abs(v.size[0] - 40) < 0.1 && Math.abs(v.size[2] - 12) < 0.1 && v.tris > 20);
-  ok2("revolve", (v) => v.size && Math.abs(v.size[0] - 24) < 0.2 && Math.abs(v.size[1] - 20) < 0.2);
+  ok2("revolve", (v) => v.size && Math.abs(v.size[0] - 24) < 0.2 && Math.abs(v.size[1] - 24) < 0.2 && Math.abs(v.size[2] - 20) < 0.2);
   ok2("fillet", (v) => v.tris > 12);
   ok2("chamfer", (v) => v.tris > 12);
   ok2("shell", (v) => v.type === "PLANE" && v.tris > 12);

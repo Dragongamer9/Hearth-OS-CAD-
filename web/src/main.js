@@ -531,7 +531,7 @@ function constructTool(kind) {
   }
   const el = toolPanel(kind === "extrude" ? "Extrude" : "Revolve", kind === "extrude"
     ? `<div style="font-size:13px;color:#5d656e">Pushes the sketch up into a solid. Use a minus number to go down.</div><div class="fields"><label>Distance (mm)<input data-v type="number" step="${snapSize()}" value="${settings.extrudeDistance || 10}"></label></div>`
-    : `<div style="font-size:13px;color:#5d656e">Spins the sketch around one of its own lines through the grid's centre. Keep the sketch on one side of that line.</div><div class="fields"><label>Angle (°)<input data-v type="number" step="15" min="1" max="360" value="360"></label></div><div class="seg"><button data-axis="y" class="on">Up line (Y)</button><button data-axis="x">Side line (X)</button></div>`,
+    : `<div style="font-size:13px;color:#5d656e">Spins the sketch around a line through the grid's centre, then stands the result up on the grid (draw half a vase, get the whole vase). Keep the sketch on one side of that line.</div><div class="fields"><label>Angle (°)<input data-v type="number" step="15" min="1" max="360" value="360"></label></div><div class="seg"><button data-axis="y" class="on">Up line (Y)</button><button data-axis="x">Side line (X)</button></div>`,
     [["ok", kind === "extrude" ? "Extrude" : "Revolve", "pri"], ["cancel", "Cancel"]]);
   let axis = "y";
   el.querySelectorAll("[data-axis]").forEach((b) => b.onclick = () => { axis = b.dataset.axis; el.querySelectorAll("[data-axis]").forEach((x) => x.classList.toggle("on", x === b)); });
